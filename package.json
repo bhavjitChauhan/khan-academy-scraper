@@ -1,0 +1,23 @@
+{
+  "name": "khan-academy-scrape",
+  "version": "1.0.0",
+  "description": "Scrapes Khan Academy programs.",
+  "main": "index.js",
+  "bin": {
+    "ka-scrape": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "CLI",
+    "Khan Academy"
+  ],
+  "author": "Bhavjit Chauhan",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.0",
+    "clui": "^0.3.6",
+    "yargs": "^15.3.1"
+  }
+}
