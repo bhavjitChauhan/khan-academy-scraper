@@ -1,6 +1,6 @@
 {
   "name": "khan-academy-scraper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Simple command-line tool for scraping Khan Academy programs.",
   "main": "index.js",
   "bin": {
