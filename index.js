@@ -41,14 +41,13 @@ const argv = require('yargs')
     })
     .option('output', {
         alias: 'o',
-        default: 'programs',
-        describe: 'File name to store programs in',
+        describe: 'Custom file name to store programs in',
         type: 'string'
     })
     .option('overwrite', {
         alias: 'w',
         default: false,
-        describe: 'Overwrite any previous output file',
+        describe: 'Overwrite previous output file',
         type: 'boolean'
     })
     .option('verbose', {
@@ -123,13 +122,21 @@ let max = argv.max || Infinity;
 let lastCursor = '';
 let numberOfPrograms = 0;
 
-var file = argv.output + '.json';
+var file = argv.output ? `${argv.output}.json` : `${argv.sort}-programs.json`;
 fs.readFile(file, (error, data) => {
     if (error) {
         logger.info('No previous programs file found.');
+        fs.writeFile(file, '[{}', error => {
+            if (error) {
+                logger.error(`Error writing to file ${file}: ${error}`);
+                console.error(chalk.red(`Error writing to file ${file}: ${error}`));
+            }
+            logger.info(`Created ${file} file`);
+            console.log(`Created ${chalk.green(file)} file`);
+        });
         logger.info(`Initial URL: ${URL}`);
         verbose && console.debug(`Initial URL: ${chalk.gray(URL)}`);
-        scrape();
+        startScraping();
     } else {
         logger.info(`Found previous programs file: ${file}`);
         if (argv.overwrite) {
@@ -143,7 +150,7 @@ fs.readFile(file, (error, data) => {
             });
             logger.info(`Initial URL: ${URL}`);
             verbose && console.debug(`Initial URL: ${chalk.gray(URL)}`);
-            scrape();
+            startScraping();
         } else {
             try {
                 data = JSON.parse(data);
@@ -153,8 +160,9 @@ fs.readFile(file, (error, data) => {
                     console.error(chalk.red('No previous cursor found'));
                     throw error;
                 }
+                verbose && console.log(`Previous file has ${chalk.cyan(data.length)} programs`);
                 logger.info(`Using previous stored API cursor: '${lastCursor}'`);
-                process.stdout.write(`File ${file} already exists. Using stored API cursor`);
+                process.stdout.write(`File ${chalk.green(file)} already exists. Using stored API cursor`);
                 process.stdout.write(verbose ? `: ${chalk.gray(lastCursor)}\n` : '\n');
                 data.pop();
                 fs.writeFile(file, '[' + JSON.stringify(data).slice(1, -1), error => {
@@ -165,11 +173,11 @@ fs.readFile(file, (error, data) => {
                 });
                 logger.info(`Initial URL: ${URL}`);
                 verbose && console.debug(`Initial URL: ${chalk.gray(URL + '&cursor=' + lastCursor)}`);
-                scrape(lastCursor);
+                startScraping(lastCursor);
             } catch (error) {
                 logger.error(`Unable to read previous file: ${error}`);
                 console.error(chalk.red(`Unable to read previous file: ${error}`));
-                console.error('Use the `--overwrite` flag to overwrite previous file');
+                console.error(`Use the ${chalk.gray('--overwrite')} flag to overwrite previous file`);
                 process.exit();
             }
         }
@@ -177,96 +185,136 @@ fs.readFile(file, (error, data) => {
 });
 
 if (max != Infinity) {
-    logger.info('Maximum program limit set')
+    logger.info(`Maximum program limit set to ${max}`);
     const Progress = clui.Progress;
     var progressBar = new Progress(20);
-    process.stdout.write(progressBar.update(0, max) + '\r')
 } else {
-    logger.info('No maximum program limit set')
+    logger.info('No maximum program limit set');
     const Spinner = clui.Spinner;
-    var spinner = new Spinner('Started scraping... ');
+    var spinner = new Spinner('Starting scraping...');
     spinner.start();
 }
 
+function formatNumber(x) {
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+function startScraping(cursor) {
+    try {
+        scrape();
+        if (max != Infinity) {
+            process.stdout.write(progressBar.update(0, max))
+        } else {
+            spinner.start();
+        }
+        setInterval(() => {
+            if (!exiting) {
+                let programsPerSecond = Math.round(numberOfPrograms / ((new Date() - startTime) / 1000));
+                if (max != Infinity) {
+                    process.stdout.clearLine();
+                    process.stdout.cursorTo(0);
+                    process.stdout.write(`${progressBar.update(numberOfPrograms, max)} ${(programsPerSecond ? chalk.gray('(') + chalk.cyan(formatNumber(programsPerSecond)) + chalk.gray(' per sec)') : '')}`);
+                } else {
+                    if (numberOfPrograms != 0) {
+                        let perSecondText = `${(programsPerSecond ? chalk.gray('(') + chalk.cyan(formatNumber(programsPerSecond)) + chalk.gray(' per sec)') : '')}`;
+                        spinner.message(`${chalk.white(formatNumber(numberOfPrograms) + ' programs scraped...')} ${chalk.white(perSecondText)}`);
+                    }
+                }
+            }
+        }, 1000);
+    } catch (error) {
+        logger.error(`Error starting scraping: ${error}`);
+        console.error(chalk.red(`Error starting scraping: ${error}`));
+        handleExit();
+    }
+}
 function scrape(cursor) {
     logger.info(`New request. Using API cursor: '${cursor}'`);
-    cursor = cursor && `&cursor=${cursor}` || '';
-    https.get(URL + cursor, response => {
-        let data = '';
-        response.on('data', chunk => {
-            data += chunk;
-            logger.http(`Recieved chunk: '${chunk}'`);
+    try {
+        cursor = cursor && `&cursor=${cursor}` || '';
+        https.get(URL + cursor, response => {
+            let data = '';
+            response.on('data', chunk => {
+                data += chunk;
+                logger.http(`Recieved chunk: '${chunk}'`);
+            })
+            response.on('end', () => {
+                logger.http(`Recieved all chunks: '${data}'`);
+                data = JSON.parse(data);
+                lastCursor = data.cursor;
+                if (numberOfPrograms + limit * 2 <= max) {
+                    max != Infinity && logger.info('Maximum program limit not reached. Sending new request');
+                    setTimeout(scrape, 0, lastCursor);
+                }
+                for (scratchpad of data.scratchpads) {
+                    try {
+                        scratchpad.thumb = scratchpad.thumb.split('/')[4].slice(0, -4);
+                    } catch (error) {
+                        logger.http(`Invalid program thumbnail: '${scratchpad.thumb}'`)
+                    }
+                    try {
+                        scratchpad.url = scratchpad.url.split('/')[5];
+                    } catch (error) {
+                        logger.http(`Invalid program URL: '${scratchpad.URL}'`)
+                    }
+                    try {
+                        scratchpad.created = new Date(scratchpad.created);
+                    } catch (error) {
+                        logger.http(`Invalid program creation date: '${scratchpad.created}'`)
+                    }
+                    try {
+                        scratchpad.authorKaid = scratchpad.authorKaid.split('_')[1];
+                    } catch (error) {
+                        logger.http(`Invalid program author: '${scratchpad.authorKaid}'`)
+                    }
+                    if (!exiting) {
+                        fs.appendFile(file, ',' + JSON.stringify(omit(scratchpad, ['flaggedByUser', 'key', 'translatedTitle'])), error => {
+                            if (error) {
+                                logger.error(`Error appending program to file: ${error}`);
+                                console.error(chalk.red(`Error appending program to file: ${error}`));
+                            }
+                        });
+                    }
+                    numberOfPrograms++;
+                }
+                if (numberOfPrograms + limit > max) {
+                    handleExit();
+                }
+            })
+        }).on('error', error => {
+            logger.error(`Error requesting from API: ${error}`);
+            console.error(chalk.red(`Error requesting from API: ${error}`));
         })
-        response.on('end', () => {
-            logger.http(`Recieved all chunks: '${data}'`);
-            data = JSON.parse(data);
-            lastCursor = data.cursor;
-            if (numberOfPrograms + limit * 2 <= max) {
-                max != Infinity && logger.info('Maximum program limit not reached. Sending new request');
-                setTimeout(scrape, 0, lastCursor);
-            }
-            for (scratchpad of data.scratchpads) {
-                try {
-                    scratchpad.thumb = scratchpad.thumb.split('/')[4].slice(0, -4);
-                } catch (error) {
-                    logger.http(`Invalid program thumbnail: '${scratchpad.thumb}'`)
-                }
-                try {
-                    scratchpad.url = scratchpad.url.split('/')[5];
-                } catch (error) {
-                    logger.http(`Invalid program URL: '${scratchpad.URL}'`)
-                }
-                try {
-                    scratchpad.created = new Date(scratchpad.created);
-                } catch (error) {
-                    logger.http(`Invalid program creation date: '${scratchpad.created}'`)
-                }
-                try {
-                    scratchpad.authorKaid = scratchpad.authorKaid.split('_')[1];
-                } catch (error) {
-                    logger.http(`Invalid program author: '${scratchpad.authorKaid}'`)
-                }
-                if (!exiting) {
-                    fs.appendFile(file, ',' + JSON.stringify(omit(scratchpad, ['flaggedByUser', 'key', 'translatedTitle'])), error => {
-                        if (error) {
-                            logger.error(`Error appending program to file: ${error}`);
-                            console.error(chalk.red(`Error appending program to file: ${error}`));
-                        }
-                    });
-                }
-                numberOfPrograms++;
-                if (max != Infinity) {
-                    process.stdout.write(progressBar.update(numberOfPrograms, max) + '\r');
-                } else {
-                    spinner.message(`${numberOfPrograms} programs scraped... `);
-                }
-            }
-            if (numberOfPrograms + limit > max) {
-                handleExit();
-            }
-        })
-    }).on('error', error => {
-        logger.error(`Error requesting API: ${error}`);
-        console.error(chalk.red(`Error requesting API: ${error}`));
-    })
+    } catch (error) {
+        logger.error(`Error scraping: ${error}`);
+        console.error(chalk.red(`Error scraping: ${error}`));
+        handleExit();
+    }
 }
 function handleExit() {
-    let time = new Date() - startTime;
+    let elapsedTime = ((new Date() - startTime) / 1000).toFixed(2);
     exiting = true;
-    let cursorObject = {
-        cursor: lastCursor
-    };
-    spinner.stop();
-    process.stdout.write(chalk.gray('Safely exiting...\r'));
+    if (max == Infinity) spinner.stop();
+    process.stdout.clearLine();
+    process.stdout.cursorTo(0);
+    process.stdout.write(chalk.gray('Safely exiting...'));
     setTimeout(() => {
-        fs.appendFile(file, (lastCursor != '' ? ',' + JSON.stringify(cursorObject) : '') + ']', error => {
+        let cursorObject = {
+            cursor: lastCursor
+        };
+        fs.appendFile(file, (lastCursor ? ',' + JSON.stringify(cursorObject) : '') + ']', error => {
             if (error) {
                 logger.error(`Error appending program to file: ${error}`);
                 console.error(chalk.red(`Error appending program to file: ${error}`));
             }
-            logger.info(`Completed scraping ${numberOfPrograms + limit} programs in ${time}ms`);
-            (lastCursor && verbose) && console.log(`\rLast API cursor: ${chalk.gray(lastCursor)}`);
-            process.stdout.write(`\rCompleted scraping ${chalk.cyan(numberOfPrograms)} programs in ${chalk.cyan(time + 'ms')}.\n`);
+            logger.info(`Completed scraping ${formatNumber(numberOfPrograms + limit)} programs in ${elapsedTime}s`);
+            if (lastCursor && verbose) {
+                process.stdout.clearLine();
+                process.stdout.cursorTo(0);
+                process.stdout.write(`Last API cursor: ${chalk.gray(lastCursor)}\n`);
+            }
+            process.stdout.clearLine();
+            process.stdout.cursorTo(0);
+            process.stdout.write(`Completed scraping ${chalk.cyan(formatNumber(numberOfPrograms))} programs in ${chalk.cyan(elapsedTime + 's')}\n`);
             process.exit();
         });
     }, 1000);
