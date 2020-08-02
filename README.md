@@ -27,9 +27,10 @@ Options:
   --cursor, -c     Specify starting API cursor                          [string]
   --sort, -s       Program list to scrape
                   [choices: "recent", "hot", "contests", "top"] [default: "top"]
-  --output, -o     File name to store programs in [string] [default: "programs"]
-  --overwrite, -w  Overwrite any previous output file [boolean] [default: false]
+  --output, -o     Custom file name to store programs in                [string]
+  --overwrite, -w  Overwrite previous output file     [boolean] [default: false]
   --verbose, -v    Run in verbose mode                [boolean] [default: false]
+  --silent         Supress logging to file            [boolean] [default: false]
   -h, --help       Show help                                           [boolean]
 ```
 

@@ -16,7 +16,7 @@ process.stdin.on('keypress', (str, key) => {
 });
 
 const argv = require('yargs')
-    .command('$0', 'Scrape Khan Academy programs.', () => { }, (argv) => { })
+    .command('$0', 'Scrape Khan Academy programs.')
     .option('max', {
         alias: 'm',
         describe: 'Maximum number of programs scraped',
@@ -119,7 +119,7 @@ URL = URL.slice(0, -1);
 
 let exiting = false;
 let max = argv.max || Infinity;
-let lastCursor = '';
+let lastCursor = argv.cursor || '';
 let numberOfPrograms = 0;
 
 var file = argv.output ? `${argv.output}.json` : `${argv.sort}-programs.json`;
@@ -134,8 +134,6 @@ fs.readFile(file, (error, data) => {
             logger.info(`Created ${file} file`);
             console.log(`Created ${chalk.green(file)} file`);
         });
-        logger.info(`Initial URL: ${URL}`);
-        verbose && console.debug(`Initial URL: ${chalk.gray(URL)}`);
         startScraping();
     } else {
         logger.info(`Found previous programs file: ${file}`);
@@ -148,32 +146,31 @@ fs.readFile(file, (error, data) => {
                     console.error(chalk.red(`Error writing to file ${file}: ${error}`));
                 }
             });
-            logger.info(`Initial URL: ${URL}`);
-            verbose && console.debug(`Initial URL: ${chalk.gray(URL)}`);
             startScraping();
         } else {
             try {
                 data = JSON.parse(data);
-                lastCursor = data[data.length - 1].cursor;
-                if (!lastCursor) {
-                    logger.error('No previous cursor found')
-                    console.error(chalk.red('No previous cursor found'));
-                    throw error;
+                if (!argv.cursor) {
+                    lastCursor = data[data.length - 1].cursor;
+                    if (!lastCursor) {
+                        logger.error('No previous cursor found')
+                        console.error(chalk.red('No previous cursor found'));
+                        throw error;
+                    }
+                    logger.info(`Using previous stored API cursor: '${lastCursor}'`);
+                    process.stdout.write(`File ${chalk.green(file)} already exists. Using stored API cursor`);
+                    process.stdout.write(verbose ? `: ${chalk.gray(lastCursor)}\n` : '\n');
                 }
-                verbose && console.log(`Previous file has ${chalk.cyan(data.length)} programs`);
-                logger.info(`Using previous stored API cursor: '${lastCursor}'`);
-                process.stdout.write(`File ${chalk.green(file)} already exists. Using stored API cursor`);
-                process.stdout.write(verbose ? `: ${chalk.gray(lastCursor)}\n` : '\n');
                 data.pop();
+                logger.info(`Previous file has ${chalk.cyan(data.length)} programs`);
+                verbose && console.log(`Previous file has ${chalk.cyan(data.length)} programs`);
                 fs.writeFile(file, '[' + JSON.stringify(data).slice(1, -1), error => {
                     if (error) {
                         logger.error(`Error writing to file ${file}: ${error}`);
                         console.error(chalk.red(`Error writing to file ${file}: ${error}`));
                     }
                 });
-                logger.info(`Initial URL: ${URL}`);
-                verbose && console.debug(`Initial URL: ${chalk.gray(URL + '&cursor=' + lastCursor)}`);
-                startScraping(lastCursor);
+                startScraping();
             } catch (error) {
                 logger.error(`Unable to read previous file: ${error}`);
                 console.error(chalk.red(`Unable to read previous file: ${error}`));
@@ -199,8 +196,20 @@ function formatNumber(x) {
     return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 function startScraping(cursor) {
+    cursor = argv.cursor || lastCursor || false;
+    if (argv.cursor) {
+        logger.info(`Using given API cursor: '${lastCursor}'`);
+        process.stdout.write(`Using given API cursor`);
+        process.stdout.write(verbose ? `: ${chalk.gray(lastCursor)}\n` : '\n');
+    }
+    logger.info(`Initial URL: ${URL + (lastCursor ? '&cursor=' + lastCursor : '')}`);
+    verbose && console.debug(`Initial URL: ${chalk.gray(URL + (lastCursor ? '&cursor=' + lastCursor : ''))}`);
     try {
-        scrape();
+        if (cursor) {
+            scrape(cursor);
+        } else {
+            scrape();
+        }
         if (max != Infinity) {
             process.stdout.write(progressBar.update(0, max))
         } else {
